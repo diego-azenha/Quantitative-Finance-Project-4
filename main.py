@@ -17,7 +17,7 @@ RESULTS_DIR.mkdir(exist_ok=True)
 mpl.rcParams["figure.dpi"] = 150
 
 # ------------------------------------------------------------------ #
-# 1. Dados
+# 1. Data
 # ------------------------------------------------------------------ #
 prices = pd.read_parquet(DATA_DIR / "clean_stock_prices.parquet")
 caps   = pd.read_parquet(DATA_DIR / "clean_mkt_cap.parquet")
@@ -25,10 +25,10 @@ caps   = pd.read_parquet(DATA_DIR / "clean_mkt_cap.parquet")
 prices.index = pd.to_datetime(prices.index)
 caps.index   = pd.to_datetime(caps.index)
 
-# Alinhar índices
+# Align indexes
 caps = caps.reindex(prices.index).ffill()
 
-# Retornos diários
+# Daily returns
 rets = prices.pct_change().dropna(how="all")
 
 # S&P500 benchmark
@@ -41,7 +41,7 @@ spx = (
 )
 
 # ------------------------------------------------------------------ #
-# 2. Funções utilitárias
+# 2. Utility Functions
 # ------------------------------------------------------------------ #
 ANNUAL_RF = 0.0492
 TRADING_DAYS = 252
@@ -59,9 +59,9 @@ def sharpe(x):
 
 def backtest_momentum(prices, lookback, top_frac=None, cash=0.05):
     """
-    Momentum diário com rebalance mensal e pesos fixos durante o mês.
-    top_frac=None -> Time-Series (TS): seleciona ativos com retorno >0
-    top_frac=0.xx -> Cross-Section (CS): pega top frac dos ativos
+    Daily momentum with monthly rebalance and fixed weights during the month.
+    top_frac=None -> Time-Series (TS): selects assets with return > 0
+    top_frac=0.xx -> Cross-Sectional (CS): picks top frac of assets
     """
     rets = prices.pct_change().dropna()
     last_td = (
@@ -79,7 +79,7 @@ def backtest_momentum(prices, lookback, top_frac=None, cash=0.05):
         month_rets = rets.loc[(rets.index > start) & (rets.index <= end)]
         if month_rets.empty: continue
 
-        # sinal de momentum calculado no rebalance
+        # momentum signal computed at rebalance date
         signal = (prices.loc[start] / prices.shift(lookback).loc[start] - 1)
 
         if top_frac is None:  # TS
@@ -88,7 +88,7 @@ def backtest_momentum(prices, lookback, top_frac=None, cash=0.05):
             k = max(1, int(len(signal) * top_frac))
             selected = signal.nlargest(k).index
 
-        # pesos alvo
+        # target weights
         if len(selected) == 0:
             target = pd.Series(0.0, index=cols)
         else:
@@ -96,7 +96,7 @@ def backtest_momentum(prices, lookback, top_frac=None, cash=0.05):
             target = target.reindex(cols).fillna(0.0)
         target["CASH"] = cash
 
-        # aplica pesos fixos durante o mês
+        # apply fixed weights during the month
         for dt, r in month_rets.iterrows():
             port_ret = float(np.dot(target.drop("CASH", errors="ignore"),
                                     r.reindex(cols).fillna(0)))
@@ -108,7 +108,7 @@ def backtest_momentum(prices, lookback, top_frac=None, cash=0.05):
     return daily_series, weights_df
 
 # ------------------------------------------------------------------ #
-# 3. EW e VW (com drift + rebalance mensal)
+# 3. EW and VW (with drift + monthly rebalance)
 # ------------------------------------------------------------------ #
 last_td = (
     pd.Series(1, index=rets.index)
@@ -131,7 +131,7 @@ for i in range(len(last_td) - 1):
     # EW target
     ew_target = pd.Series(1.0/N, index=cols)
 
-    # VW target (do mkt cap)
+    # VW target (from market cap)
     mcaps = caps.loc[start].reindex(cols)
     vw_target = mcaps / mcaps.sum()
     vw_target = vw_target.fillna(1.0/N)
@@ -159,7 +159,6 @@ vw_weights = pd.DataFrame(vw_w_hist)
 # ------------------------------------------------------------------ #
 # 4. Momentum Portfolios
 # ------------------------------------------------------------------ #
-
 ts_ret, ts_weights = backtest_momentum(prices, lookback=12, cash=0.05)
 cs_ret, cs_weights = backtest_momentum(prices, lookback=12, cash=0.05, top_frac=0.20)
 
@@ -186,10 +185,10 @@ perf_tbl = pd.DataFrame({
     for k, v in portfolios.items()
 }).T.round(4)
 
-# Tabela plottable
+# Plottable table
 perf_fmt = perf_tbl.reset_index().rename(columns={"index":"Strategy"})
 col_defs = [
-    ColumnDefinition("Strategy", title="Estratégia"),
+    ColumnDefinition("Strategy", title="Strategy"),
     ColumnDefinition("CAGR", formatter="{:.2%}"),
     ColumnDefinition("Vol", formatter="{:.2%}"),
     ColumnDefinition("Sharpe", formatter="{:.2f}")
@@ -200,25 +199,25 @@ fig.savefig(RESULTS_DIR/"perf_table.png", bbox_inches="tight")
 plt.close(fig)
 
 # ------------------------------------------------------------------ #
-# 6. Curva de Capital
+# 6. Capital Growth Curve
 # ------------------------------------------------------------------ #
 fig, ax = plt.subplots(figsize=(9,5))
 for k, v in portfolios.items():
     ((1+v).cumprod()).plot(ax=ax, label=k, lw=1.2)
-ax.set_title("Crescimento de $1 — Estratégias Comparadas")
+ax.set_title("Growth of $1 — Strategy Comparison")
 ax.legend()
 fig.tight_layout()
 fig.savefig(RESULTS_DIR/"comparison_curve.png")
 plt.close(fig)
 
 # ------------------------------------------------------------------ #
-# 7. Gráficos de pesos
+# 7. Weight Charts
 # ------------------------------------------------------------------ #
 def plot_weights(weights_df, name):
     fig, ax = plt.subplots(figsize=(10,6))
     weights_df.plot.area(ax=ax, linewidth=0)
-    ax.set_title(f"Evolução dos Pesos — {name}")
-    ax.set_ylabel("Peso")
+    ax.set_title(f"Weight Evolution — {name}")
+    ax.set_ylabel("Weight")
     ax.legend(loc="upper left", bbox_to_anchor=(1,1), fontsize="small", ncol=2)
     fig.tight_layout()
     fig.savefig(RESULTS_DIR/f"weights_{name}.png", dpi=150)
@@ -234,4 +233,4 @@ plot_weights(cs_weights, "CS")
 # ------------------------------------------------------------------ #
 print("\n===== Performance =====")
 print(perf_tbl.to_markdown())
-print(f"\nArquivos salvos em {RESULTS_DIR.resolve()}")
+print(f"\nFiles saved in {RESULTS_DIR.resolve()}")
